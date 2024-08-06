@@ -4,10 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <stddef.h>
-#include <assert.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 
 char str[1000] = "Sanhedryn!\n";
@@ -28,10 +26,10 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 
 	memset(stbuf, 0, sizeof(struct stat));
 	if (strcmp(path, "/") == 0) {
-		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_mode = __S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} else if (strcmp(path+1, "hello") == 0) {
-		stbuf->st_mode = S_IFREG | 0644;
+		stbuf->st_mode = __S_IFREG | 0644;
 		stbuf->st_nlink = 1;
 		stbuf->st_size = strlen(str);
 		stbuf->st_uid = getuid();
