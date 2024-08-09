@@ -2,12 +2,12 @@
 ```bash
 $ git clone https://github.com/collaborative-system/playground
 $ cd playground
-$ mkdir -p buildDir
-$ meson setup buildDir
-$ meson compile -C buildDir
+$ mkdir -p build
+$ meson setup build
+$ meson compile -C build 
 ```
 
 # Running
 ```bash
-$ ./buildDir/playground <mount-path>
+$ ./build/playground <mount-path>
 ```

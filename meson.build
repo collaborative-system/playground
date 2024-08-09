@@ -2,7 +2,7 @@ project('playground', 'c',
         version : '0.1',
         default_options : {
             'buildtype' : 'debug',
-            'warning_level' : 3,
+            'warning_level' : '3',
             'c_std' : 'c2x',
             'b_lto' : true,
             'default_library' : 'static'
