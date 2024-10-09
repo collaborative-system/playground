@@ -1,3 +1,4 @@
+#define FUSE_USE_VERSION 31
 #include "../common/io.h"
 #include "../common/log.h"
 #include <csignal>
