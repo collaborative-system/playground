@@ -1,5 +1,6 @@
 CC := g++
 CFLAGS := -g -lfuse3 -Wall -Wextra -pedantic -std=c++20 `pkg-config --cflags --libs protobuf` -pthread
+COMMON := common/io.cpp common/header.cpp common/log.cpp proto/models.pb.cc
 
 all: build
 
@@ -20,7 +21,7 @@ client-run: client
 client: client/client
 
 client/client: proto/models.pb.cc proto/models.pb.h
-	$(CC) $(CFLAGS) -o $@ client/main.cpp proto/models.pb.o common/objects.cpp
+	$(CC) $(CFLAGS) -o $@ client/main.cpp $(COMMON)
 
 .PHONY: clean-client
 clean-client:
@@ -34,7 +35,7 @@ server-run: server
 server: server/server
 
 server/server: proto/models.pb.cc proto/models.pb.h
-	$(CC) $(CFLAGS) -o $@ server/main.cpp proto/models.pb.o common/objects.cpp
+	$(CC) $(CFLAGS) -o $@ server/main.cpp $(COMMON)
 
 .PHONY: clean-server
 clean-server:

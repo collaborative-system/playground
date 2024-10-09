@@ -15,4 +15,13 @@ struct recv_handlers {
   int (*init_response)(int sock, int id, models::InitResponse init_response);
 };
 
+struct reqs_handlers {
+  int (*init_request)(int sock, int id, models::InitRequest init_request);
+  int (response_handler)(int sock, int id, google::protobuf::Message &message);
+};
+
+int handle_recv(int sock, reqs_handlers &handlers);
+
 int handle_recv(int sock, recv_handlers &handlers);
+
+int full_read(int fd, char *buf, int size);
