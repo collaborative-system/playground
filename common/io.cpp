@@ -13,13 +13,15 @@ int send_packet(int sock, int id, models::PacketType type,
   header.size = message->ByteSizeLong();
   header.id = id;
   header.type = type;
+  // one send call for packet
   char *buffer = serialize(&header);
   int len = send(sock, buffer, sizeof(Header), 0);
-  log(DEBUG, sock, "(%d) Send header success: %d bytes", id, len);
   delete[] buffer;
   if (len < 0) {
     log(DEBUG, sock, "(%d) Send header failed: %s", id, strerror(errno));
     return -1;
+  } else {
+    log(DEBUG, sock, "(%d) Send header success: %d bytes", id, len);
   }
   buffer = new char[message->ByteSizeLong()];
   bool err = message->SerializeToArray(buffer, message->ByteSizeLong());
@@ -110,6 +112,118 @@ int handle_recv(int sock, recv_handlers &handlers) {
     }
     break;
   }
+  case models::PacketType::GETATTR_REQUEST: {
+    models::GetattrRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received GetattrRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.getattr_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::GETATTR_RESPONSE: {
+    models::GetattrResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received GetattrResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.getattr_response(sock, header->id, response);
+    }
+    break;
+  }
+  case models::PacketType::READDIR_REQUEST: {
+    models::ReaddirRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReaddirRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.readdir_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::READDIR_RESPONSE: {
+    models::ReaddirResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReaddirResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.readdir_response(sock, header->id, response);
+    }
+    break;
+  }
+  case models::PacketType::OPEN_REQUEST: {
+    models::OpenRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received OpenRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.open_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::OPEN_RESPONSE: {
+    models::OpenResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received OpenResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.open_response(sock, header->id, response);
+    }
+    break;
+  }
+  case models::PacketType::RELEASE_REQUEST: {
+    models::ReleaseRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReleaseRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.release_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::RELEASE_RESPONSE: {
+    models::ReleaseResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReleaseResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.release_response(sock, header->id, response);
+    }
+    break;
+  }
   default:
     log(DEBUG, sock, "(%d) Unknown packet type: %d", header->id, header->type);
     break;
@@ -124,4 +238,3 @@ int handle_recv(int sock, recv_handlers &handlers) {
   delete[] recv_buffer;
   return ret;
 };
-

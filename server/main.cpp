@@ -1,3 +1,7 @@
+#include <google/protobuf/timestamp.pb.h>
+#include <list>
+#include <string>
+#include <sys/stat.h>
 #define FUSE_USE_VERSION 31
 #include "../common/io.h"
 #include "../common/log.h"
@@ -6,13 +10,19 @@
 #include <cstdlib>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <thread>
 #include <vector>
+#include <dirent.h>
+#include <fcntl.h>
 
-int init_response(int sock, int id, models::InitResponse init_response) {
+std::string working_dir;
+std::map<std::string, int> path_to_fd;
+
+template <typename T> int response_handler(int sock, int id, T message) {
   (void)sock;
   (void)id;
-  (void)init_response;
+  (void)message;
   return 0;
 }
 
@@ -29,8 +39,92 @@ int init_request(int sock, int id, models::InitRequest init_request) {
   return 0;
 }
 
-recv_handlers handlers{.init_request = init_request,
-                       .init_response = init_response};
+int getattr_request(int sock, int id, models::GetattrRequest request) {
+  struct stat st;
+  int err = stat((working_dir + request.path()).c_str(), &st);
+  models::GetattrResponse response;
+  if (err >= 0) {
+    response.mutable_stbuf()->set_mtime(st.st_mtime);
+    response.mutable_stbuf()->set_size(st.st_size);
+    response.mutable_stbuf()->set_mode(st.st_mode);
+  }
+  response.set_error(err);
+  err = send_packet(sock, id, models::GETATTR_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending getattr response");
+    return err;
+  }
+  return 0;
+}
+
+int readdir_request(int sock, int id, models::ReaddirRequest request) {
+  DIR *dir = opendir((working_dir + request.path()).c_str());
+  log(DEBUG, sock, "Readdir request for %s", (working_dir + request.path()).c_str());
+  struct dirent *entry;
+  std::list<std::string> entries;
+  models::ReaddirResponse response;
+  if (dir != nullptr) {
+    while ((entry = readdir(dir)) != nullptr) {
+      response.add_entries(entry->d_name);
+    }
+    response.set_error(1);
+  } else {
+    response.set_error(0);
+  }
+  int err = send_packet(sock, id, models::READDIR_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending readdir response");
+    return err;
+  }
+  return 0;
+}
+
+int open_request(int sock, int id, models::OpenRequest request) {
+  int fd = open((working_dir + request.path()).c_str(), O_RDWR);
+  models::OpenResponse response;
+  if (fd >= 0) {
+    path_to_fd[request.path()] = fd;
+    response.set_error(0);
+  } else {
+    response.set_error(-1);
+  }
+  int err = send_packet(sock, id, models::OPEN_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending open response");
+    return err;
+  }
+  return 0;
+}
+
+int release_request(int sock, int id, models::ReleaseRequest request) {
+  int fd = path_to_fd[request.path()];
+  int err = close(fd);
+  models::ReleaseResponse response;
+  if (err >= 0) {
+    response.set_error(0);
+  } else {
+    response.set_error(-1);
+  }
+  err = send_packet(sock, id, models::RELEASE_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending release response");
+    return err;
+  }
+  return 0;
+}
+
+recv_handlers handlers{
+    .init_request = init_request,
+    .init_response = response_handler<models::InitResponse>,
+    .getattr_request = getattr_request,
+    .getattr_response = response_handler<models::GetattrResponse>,
+    .readdir_request = readdir_request,
+    .readdir_response = response_handler<models::ReaddirResponse>,
+    .open_request = open_request,
+    .open_response = response_handler<models::OpenResponse>,
+    .release_request = release_request,
+    .release_response = response_handler<models::ReleaseResponse>,
+};
 
 void client_handler(int fd) {
   while (true) {
@@ -59,7 +153,12 @@ void signal_handler(int signum) {
   exit(signum);
 }
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <working_dir>\n", argv[0]);
+    return 1;
+  }
+  working_dir = argv[1];
   int port = 7400;
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
@@ -71,22 +170,22 @@ int main() {
   addr.sin_port = htons(port);
   addr.sin_addr.s_addr = INADDR_ANY;
   if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    perror("bind");
+    log(ERROR, sock, "Error bind port: %s", strerror(errno));
     return 1;
   }
   constexpr int one = 1;
-  int err = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-  if (err < 0) {
-    log(ERROR, sock, "Error setting socket options: %s", strerror(errno));
-    return 1;
-  }
-  err = listen(sock, 10);
+  int err = listen(sock, 10);
   if (err < 0) {
     log(ERROR, sock, "Error listening: %s", strerror(errno));
     return 1;
   }
   log(INFO, sock, "Listening on port %d", port);
   signal(SIGINT, signal_handler);
+  err = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+  if (err < 0) {
+    log(ERROR, sock, "Error setting socket options: %s", strerror(errno));
+    return 1;
+  }
   struct sockaddr_in client_addr;
   socklen_t client_addr_len = sizeof(client_addr);
   while (true) {

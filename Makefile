@@ -15,7 +15,7 @@ clean-all: clean clean-proto
 
 .PHONY: client-run
 client-run: client
-	./client/client
+	./client/client -f test/
 
 .PHONY: client
 client: client/client
@@ -29,7 +29,7 @@ clean-client:
 
 .PHONY: server-run
 server-run: server
-	./server/server
+	./server/server ~/name
 
 .PHONY: server
 server: server/server

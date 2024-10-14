@@ -1,4 +1,8 @@
 #define FUSE_USE_VERSION 31
+#include <absl/strings/str_format.h>
+#include <google/protobuf/any.pb.h>
+#include <google/protobuf/message_lite.h>
+#include <iostream>
 #include "../common/io.h"
 #include "../common/log.h"
 #include "../proto/models.pb.h"
@@ -14,29 +18,51 @@
 #include <thread>
 #include <unistd.h>
 
-std::map<int, google::protobuf::Message *> messages;
+std::map<int, std::string> messages;
 std::map<int, std::condition_variable> conditions;
 std::map<int, std::mutex> mutexes;
+int requst_id = 0;
 
 template <typename T> int response_handler(int sock, int id, T message) {
   (void)sock;
   std::unique_lock<std::mutex> lock(mutexes[id]);
-  messages[id] = &message;
+  messages[id] = message.SerializeAsString();
   conditions[id].notify_all();
   lock.unlock();
   return 0;
 }
 
-int init_request(int sock, int id, models::InitRequest init_request) {
+// int res(int sock, int id, models::ReaddirResponse message) {
+//   (void)sock;
+//   for (int i = 0; i < message.entries_size(); i++) {
+//     std::cout << message.entries(i) << std::endl;
+//   }
+//   std::unique_lock<std::mutex> lock(mutexes[id]);
+//   messages[id] = message.SerializeToString(std::string *output);
+//   message.SerializeAsString();
+//   conditions[id].notify_all();
+//   lock.unlock();
+//   return 0;
+// }
+
+template <typename T> int request_handler(int sock, int id, T message) {
   (void)sock;
   (void)id;
-  (void)init_request;
+  (void)message;
   return 0;
 }
 
 static recv_handlers handlers{
-    .init_request = init_request,
+    .init_request = request_handler<models::InitRequest>,
     .init_response = response_handler<models::InitResponse>,
+    .getattr_request = request_handler<models::GetattrRequest>,
+    .getattr_response = response_handler<models::GetattrResponse>,
+    .readdir_request = request_handler<models::ReaddirRequest>,
+    .readdir_response = response_handler<models::ReaddirResponse>,
+    .open_request = request_handler<models::OpenRequest>,
+    .open_response = response_handler<models::OpenResponse>,
+    .release_request = request_handler<models::ReleaseRequest>,
+    .release_response = response_handler<models::ReleaseResponse>,
 };
 
 int recv_thread(int sock) {
@@ -48,7 +74,7 @@ int recv_thread(int sock) {
     if (err < 0) {
       close(sock);
       log(INFO, sock, "Closing connection");
-      return -1;
+      exit(0);
     }
   }
   return 0;
@@ -62,20 +88,110 @@ static void *init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   cfg->kernel_cache = 1;
   models::InitRequest init_request;
   init_request.set_project_name("Project");
+  int id = requst_id++;
   int err =
-      send_packet(sock, 1, models::PacketType::INIT_REQUEST, &init_request);
+      send_packet(sock, id, models::PacketType::INIT_REQUEST, &init_request);
   if (err < 0) {
     log(ERROR, sock, "Error sending packet");
     return NULL;
   }
-  std::unique_lock<std::mutex> lock(mutexes[1]);
-  while (messages.find(1) == messages.end()) {
-    conditions[1].wait(lock);
+  std::unique_lock<std::mutex> lock(mutexes[id]);
+  while (messages.find(id) == messages.end()) {
+    conditions[id].wait(lock);
   }
-  models::InitResponse *init_response =
-      static_cast<models::InitResponse *>(messages[1]);
+  models::InitResponse *init_response = new models::InitResponse();
+  bool error = init_response->ParseFromString(messages[id]);
+  if (!error) {
+    log(ERROR, sock, "Error parsing init response");
+    return NULL;
+  }
   log(INFO, sock, "Received init response: %s", init_response->error());
   return NULL;
+}
+
+static int getattr(const char *path, struct stat *stbuf,
+                   struct fuse_file_info *fi) {
+  log(INFO, sock, "Getting attributes for path %s", path);
+  if (strcmp(path, "/") == 0) {
+    stbuf->st_mode = S_IFDIR | 0755;
+    stbuf->st_nlink = 2;
+    return 0;
+  }
+  models::GetattrRequest get_attr_request;
+  get_attr_request.set_path(path);
+  int id = requst_id++;
+  int err = send_packet(sock, id, models::PacketType::GETATTR_REQUEST,
+                        &get_attr_request);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending packet");
+    return -EBUSY;
+  }
+  std::unique_lock<std::mutex> lock(mutexes[id]);
+  while (messages.find(id) == messages.end()) {
+    conditions[id].wait(lock);
+  }
+  models::GetattrResponse *get_attr_response = new models::GetattrResponse();
+  bool error = get_attr_response->ParseFromString(messages[id]);
+  if (!error) {
+    log(ERROR, sock, "Error parsing getattr response");
+    return -EBUSY;
+  }
+  lock.unlock();
+  log(INFO, sock, "Received getattr response for path %s", path);
+  int ret = get_attr_response->error();
+  if (ret < 0) {
+    return ret;
+  }
+  stbuf->st_mode = get_attr_response->stbuf().mode();
+  stbuf->st_size = get_attr_response->stbuf().size();
+  stbuf->st_uid = getuid();
+  stbuf->st_gid = getgid();
+  stbuf->st_mtime = get_attr_response->stbuf().mtime();
+  messages.erase(id);
+  mutexes.erase(id);
+  conditions.erase(id);
+  return ret;
+}
+
+static int readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                   off_t offset, struct fuse_file_info *fi,
+                   enum fuse_readdir_flags flags) {
+  log(INFO, sock, "Reading directory %s", path);
+  models::ReaddirRequest readdir_request;
+  readdir_request.set_path(path);
+  int id = requst_id++;
+  int err = send_packet(sock, id, models::PacketType::READDIR_REQUEST,
+                        &readdir_request);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending packet");
+    return -EBUSY;
+  }
+  std::unique_lock<std::mutex> lock(mutexes[id]);
+  while (messages.find(id) == messages.end()) {
+    conditions[id].wait(lock);
+  }
+  models::ReaddirResponse *readdir_response = new models::ReaddirResponse();
+  bool error = readdir_response->ParseFromString(messages[id]);
+  if (!error) {
+    log(ERROR, sock, "Error parsing readdir response");
+    return -EBUSY;
+  }
+  lock.unlock();
+  log(INFO, sock, "Received readdir response for path %s", path);
+  int ret = readdir_response->error();
+  if (ret < 0) {
+    return ret;
+  }
+
+  google::protobuf::RepeatedPtrField<std::string> *entries =
+      readdir_response->mutable_entries();
+  for (int i = 0; i < entries->size(); i++) {
+    std::string name = entries->Get(i);
+    std::cout << name << std::endl;
+    log(INFO, sock, "Adding entry %s", name.c_str());
+    filler(buf, name.c_str(), NULL, 0, FUSE_FILL_DIR_PLUS);
+  }
+  return 0;
 }
 
 static void destroy(void *private_data) {
@@ -86,8 +202,10 @@ static void destroy(void *private_data) {
 }
 
 static struct fuse_operations fuse_opr = {
-  .init = init,
-  .destroy = destroy,
+    .getattr = getattr,
+    .readdir = readdir,
+    .init = init,
+    .destroy = destroy,
 };
 
 int main(int argc, char *argv[]) {

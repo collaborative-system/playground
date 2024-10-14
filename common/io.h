@@ -13,14 +13,15 @@ int send_packet(int sock, int id, models::PacketType type,
 struct recv_handlers {
   int (*init_request)(int sock, int id, models::InitRequest init_request);
   int (*init_response)(int sock, int id, models::InitResponse init_response);
+  int (*getattr_request)(int sock, int id, models::GetattrRequest getattr_request);
+  int (*getattr_response)(int sock, int id, models::GetattrResponse getattr_response);
+  int (*readdir_request)(int sock, int id, models::ReaddirRequest readdir_request);
+  int (*readdir_response)(int sock, int id, models::ReaddirResponse readdir_response);
+  int (*open_request)(int sock, int id, models::OpenRequest open_request);
+  int (*open_response)(int sock, int id, models::OpenResponse open_response);
+  int (*release_request)(int sock, int id, models::ReleaseRequest release_request);
+  int (*release_response)(int sock, int id, models::ReleaseResponse release_response);
 };
-
-struct reqs_handlers {
-  int (*init_request)(int sock, int id, models::InitRequest init_request);
-  int (response_handler)(int sock, int id, google::protobuf::Message &message);
-};
-
-int handle_recv(int sock, reqs_handlers &handlers);
 
 int handle_recv(int sock, recv_handlers &handlers);
 
