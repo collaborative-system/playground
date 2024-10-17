@@ -13,7 +13,6 @@ int send_packet(int sock, int id, models::PacketType type,
   header.size = message->ByteSizeLong();
   header.id = id;
   header.type = type;
-  // one send call for packet
   char *buffer = serialize(&header);
   int len = send(sock, buffer, sizeof(Header), 0);
   delete[] buffer;
@@ -221,6 +220,62 @@ int handle_recv(int sock, recv_handlers &handlers) {
       log(DEBUG, sock, "(%d) Received ReleaseResponse: %s", header->id,
           debug.c_str());
       ret = handlers.release_response(sock, header->id, response);
+    }
+    break;
+  }
+  case models::PacketType::READ_REQUEST: {
+    models::ReadRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReadRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.read_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::READ_RESPONSE: {
+    models::ReadResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received ReadResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.read_response(sock, header->id, response);
+    }
+    break;
+  }
+  case models::PacketType::WRITE_REQUEST: {
+    models::WriteRequest request;
+    bool err = request.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = request.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received WriteRequest: %s", header->id,
+          debug.c_str());
+      ret = handlers.write_request(sock, header->id, request);
+    }
+    break;
+  }
+  case models::PacketType::WRITE_RESPONSE: {
+    models::WriteResponse response;
+    bool err = response.ParseFromArray(recv_buffer, header->size);
+    if (!err) {
+      return -2;
+    } else {
+      std::string debug = response.DebugString();
+      debug.pop_back();
+      log(DEBUG, sock, "(%d) Received WriteResponse: %s", header->id,
+          debug.c_str());
+      ret = handlers.write_response(sock, header->id, response);
     }
     break;
   }

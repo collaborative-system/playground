@@ -21,6 +21,10 @@ struct recv_handlers {
   int (*open_response)(int sock, int id, models::OpenResponse open_response);
   int (*release_request)(int sock, int id, models::ReleaseRequest release_request);
   int (*release_response)(int sock, int id, models::ReleaseResponse release_response);
+  int (*read_request)(int sock, int id, models::ReadRequest read_request);
+  int (*read_response)(int sock, int id, models::ReadResponse read_response);
+  int (*write_request)(int sock, int id, models::WriteRequest write_request);
+  int (*write_response)(int sock, int id, models::WriteResponse write_response);
 };
 
 int handle_recv(int sock, recv_handlers &handlers);

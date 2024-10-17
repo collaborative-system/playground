@@ -1,8 +1,6 @@
 syntax = "proto3";
 option go_package = "models/";
 package models;
-import "google/protobuf/any.proto";
-import "google/protobuf/timestamp.proto";
 
 enum PacketType {
   INIT_REQUEST = 0;
@@ -15,6 +13,10 @@ enum PacketType {
   OPEN_RESPONSE = 7;
   RELEASE_REQUEST = 8;
   RELEASE_RESPONSE = 9;
+  READ_REQUEST = 10;
+  READ_RESPONSE = 11;
+  WRITE_REQUEST = 12;
+  WRITE_RESPONSE = 13;
 }
 
 message InitRequest { string project_name = 1; }
@@ -47,3 +49,22 @@ message OpenResponse { int32 error = 1; }
 message ReleaseRequest { string path = 1; }
 
 message ReleaseResponse { int32 error = 1; }
+
+message ReadRequest {
+  string path = 1;
+  int64 offset = 2;
+  int32 size = 3;
+}
+
+message ReadResponse {
+  int32 error = 1;
+  bytes data = 2;
+}
+
+message WriteRequest {
+  string path = 1;
+  int64 offset = 2;
+  bytes data = 3;
+}
+
+message WriteResponse { int32 error = 1; }

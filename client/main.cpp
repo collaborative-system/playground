@@ -1,16 +1,17 @@
 #define FUSE_USE_VERSION 31
-#include <absl/strings/str_format.h>
-#include <google/protobuf/any.pb.h>
-#include <google/protobuf/message_lite.h>
-#include <iostream>
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #include "../common/io.h"
 #include "../common/log.h"
 #include "../proto/models.pb.h"
+#include <absl/strings/str_format.h>
 #include <condition_variable>
 #include <cstdio>
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_log.h>
+#include <google/protobuf/any.pb.h>
 #include <google/protobuf/message.h>
+#include <google/protobuf/message_lite.h>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <netinet/in.h>
@@ -32,19 +33,6 @@ template <typename T> int response_handler(int sock, int id, T message) {
   return 0;
 }
 
-// int res(int sock, int id, models::ReaddirResponse message) {
-//   (void)sock;
-//   for (int i = 0; i < message.entries_size(); i++) {
-//     std::cout << message.entries(i) << std::endl;
-//   }
-//   std::unique_lock<std::mutex> lock(mutexes[id]);
-//   messages[id] = message.SerializeToString(std::string *output);
-//   message.SerializeAsString();
-//   conditions[id].notify_all();
-//   lock.unlock();
-//   return 0;
-// }
-
 template <typename T> int request_handler(int sock, int id, T message) {
   (void)sock;
   (void)id;
@@ -63,6 +51,10 @@ static recv_handlers handlers{
     .open_response = response_handler<models::OpenResponse>,
     .release_request = request_handler<models::ReleaseRequest>,
     .release_response = response_handler<models::ReleaseResponse>,
+    .read_request = request_handler<models::ReadRequest>,
+    .read_response = response_handler<models::ReadResponse>,
+    .write_request = request_handler<models::WriteRequest>,
+    .write_response = response_handler<models::WriteResponse>,
 };
 
 int recv_thread(int sock) {
@@ -194,6 +186,76 @@ static int readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   return 0;
 }
 
+static int write_(const char *path, const char *buf, size_t size, off_t offset,
+                  struct fuse_file_info *fi) {
+  log(INFO, sock, "Writing to path %d", path);
+  models::WriteRequest write_request;
+  write_request.set_path(path);
+  write_request.set_offset(offset);
+  write_request.set_data(buf);
+  int id = requst_id++;
+  int err =
+      send_packet(sock, id, models::PacketType::WRITE_REQUEST, &write_request);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending packet");
+    return -EBUSY;
+  }
+  std::unique_lock<std::mutex> lock(mutexes[id]);
+  while (messages.find(id) == messages.end()) {
+    conditions[id].wait(lock);
+  }
+  models::WriteResponse *write_response = new models::WriteResponse();
+  bool error = write_response->ParseFromString(messages[id]);
+  if (!error) {
+    log(ERROR, sock, "Error parsing write response");
+    return -EBUSY;
+  }
+  lock.unlock();
+  log(INFO, sock, "Received write response for path %s", path);
+  int ret = write_response->error();
+  if (ret < 0) {
+    return ret;
+  }
+  return size;
+}
+
+static int read_(const char *path, char *buf, size_t size, off_t offset,
+                 struct fuse_file_info *fi) {
+  log(INFO, sock, "Reading from path %s", path);
+  models::ReadRequest read_request;
+  read_request.set_path(path);
+  log(DEBUG, sock, "Offset %d", offset);
+  read_request.set_offset(offset);
+  read_request.set_size(size);
+  int id = requst_id++;
+  log(DEBUG, sock, "Read request %s", read_request.DebugString().c_str());
+  int err =
+      send_packet(sock, id, models::PacketType::READ_REQUEST, &read_request);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending packet");
+    return -EBUSY;
+  }
+  std::unique_lock<std::mutex> lock(mutexes[id]);
+  while (messages.find(id) == messages.end()) {
+    conditions[id].wait(lock);
+  }
+  models::ReadResponse *read_response = new models::ReadResponse();
+  bool error = read_response->ParseFromString(messages[id]);
+  if (!error) {
+    log(ERROR, sock, "Error parsing read response");
+    return -EBUSY;
+  }
+  lock.unlock();
+  log(INFO, sock, "Received read response for path %s", path);
+  int ret = read_response->error();
+  if (ret < 0) {
+    return ret;
+  }
+  std::string data = read_response->data();
+  memcpy(buf, data.c_str(), data.size());
+  return data.size();
+}
+
 static void destroy(void *private_data) {
   (void)private_data;
   close(sock);
@@ -203,6 +265,8 @@ static void destroy(void *private_data) {
 
 static struct fuse_operations fuse_opr = {
     .getattr = getattr,
+    .read = read_,
+    .write = write_,
     .readdir = readdir,
     .init = init,
     .destroy = destroy,

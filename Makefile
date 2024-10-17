@@ -1,4 +1,4 @@
-CC := g++
+CC := clang++
 CFLAGS := -g -lfuse3 -Wall -Wextra -pedantic -std=c++20 `pkg-config --cflags --libs protobuf` -pthread
 COMMON := common/io.cpp common/header.cpp common/log.cpp proto/models.pb.cc
 

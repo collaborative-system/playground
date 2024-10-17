@@ -8,13 +8,13 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <dirent.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <thread>
 #include <vector>
-#include <dirent.h>
-#include <fcntl.h>
 
 std::string working_dir;
 std::map<std::string, int> path_to_fd;
@@ -59,7 +59,8 @@ int getattr_request(int sock, int id, models::GetattrRequest request) {
 
 int readdir_request(int sock, int id, models::ReaddirRequest request) {
   DIR *dir = opendir((working_dir + request.path()).c_str());
-  log(DEBUG, sock, "Readdir request for %s", (working_dir + request.path()).c_str());
+  log(DEBUG, sock, "Readdir request for %s",
+      (working_dir + request.path()).c_str());
   struct dirent *entry;
   std::list<std::string> entries;
   models::ReaddirResponse response;
@@ -113,6 +114,48 @@ int release_request(int sock, int id, models::ReleaseRequest request) {
   return 0;
 }
 
+int read_request(int sock, int id, models::ReadRequest request) {
+  int fd = path_to_fd[request.path()];
+  char *buf = new char[request.size()];
+  log(DEBUG, sock, "Read request for %s", request.offset());
+  int offset = request.offset();
+  printf("offset: %d\n", offset);
+  int err = pread(fd, buf, request.size(), request.offset());
+  models::ReadResponse response;
+  if (err >= 0) {
+    response.set_data(buf, err);
+    response.set_error(0);
+  } else {
+    perror("pread");
+    response.set_error(-1);
+  }
+  log(DEBUG, sock, "Read request for %s", request.path().c_str());
+  err = send_packet(sock, id, models::READ_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending read response");
+    return err;
+  }
+  return 0;
+}
+
+int write_request(int sock, int id, models::WriteRequest request) {
+  int fd = path_to_fd[request.path()];
+  int err = pwrite(fd, request.data().c_str(), request.data().size(),
+                   request.offset());
+  models::WriteResponse response;
+  if (err >= 0) {
+    response.set_error(0);
+  } else {
+    response.set_error(-1);
+  }
+  err = send_packet(sock, id, models::WRITE_RESPONSE, &response);
+  if (err < 0) {
+    log(ERROR, sock, "Error sending write response");
+    return err;
+  }
+  return 0;
+}
+
 recv_handlers handlers{
     .init_request = init_request,
     .init_response = response_handler<models::InitResponse>,
@@ -124,7 +167,10 @@ recv_handlers handlers{
     .open_response = response_handler<models::OpenResponse>,
     .release_request = release_request,
     .release_response = response_handler<models::ReleaseResponse>,
-};
+    .read_request = read_request,
+    .read_response = response_handler<models::ReadResponse>,
+    .write_request = write_request,
+    .write_response = response_handler<models::WriteResponse>};
 
 void client_handler(int fd) {
   while (true) {
